@@ -5,7 +5,7 @@
 
 import { LessonPlan, DataStatusLabels } from '../types';
 
-export function exportLessonToWord(plan: LessonPlan): void {
+export function exportLessonToWord(plan: LessonPlan, planType: 'free' | 'pro_early' = 'free'): void {
   const dataStatusInfo = DataStatusLabels[plan.status];
   
   const content = `
@@ -116,6 +116,16 @@ export function exportLessonToWord(plan: LessonPlan): void {
           font-size: 9pt;
           color: #475569;
           text-align: center;
+        }
+        .watermark-free {
+          margin-top: 20px;
+          border: 1px dashed #ef4444;
+          background-color: #fef2f2;
+          padding: 10px;
+          font-size: 10pt;
+          color: #b91c1c;
+          text-align: center;
+          font-weight: bold;
         }
       </style>
     </head>
@@ -354,6 +364,13 @@ export function exportLessonToWord(plan: LessonPlan): void {
         Cảnh báo: Giáo án chỉ mang tính chất tham khảo chuẩn sư phạm. Giáo viên chịu trách nhiệm kiểm tra kỹ lưỡng nội dung học liệu thực tế trước khi lên lớp.<br>
         Hệ thống được vận hành bởi Nhịp Giảng Việt Nam.
       </div>
+
+      ${planType === 'free' ? `
+      <!-- Dấu mờ Tác quyền Gói Miễn phí -->
+      <div class="watermark-free">
+        Tài liệu được khởi tạo từ khung cấu trúc tham khảo Nhịp Giảng - Gói thành viên Miễn phí.
+      </div>
+      ` : ''}
     </body>
     </html>
   `;

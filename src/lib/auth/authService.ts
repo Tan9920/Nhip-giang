@@ -9,6 +9,9 @@ export interface UserAccount {
   email: string;
   role: 'teacher' | 'admin';
   createdAt: string;
+  planType?: 'free' | 'pro_early';
+  quotaLimit?: number;
+  quotaRemaining?: number;
 }
 
 const USERS_STORAGE_KEY = 'nhip_giang_registered_users_v1';
@@ -22,6 +25,9 @@ const DEFAULT_USERS: UserAccount[] = [
     email: 'gv_a@nhipgiang.edu.vn',
     role: 'teacher',
     createdAt: new Date().toISOString(),
+    planType: 'free',
+    quotaLimit: 3,
+    quotaRemaining: 3
   },
   {
     userId: 'teacher_02',
@@ -29,6 +35,9 @@ const DEFAULT_USERS: UserAccount[] = [
     email: 'gv_b@nhipgiang.edu.vn',
     role: 'teacher',
     createdAt: new Date().toISOString(),
+    planType: 'free',
+    quotaLimit: 3,
+    quotaRemaining: 3
   },
   {
     userId: 'admin',
@@ -36,6 +45,9 @@ const DEFAULT_USERS: UserAccount[] = [
     email: 'admin@nhipgiang.edu.vn',
     role: 'admin',
     createdAt: new Date().toISOString(),
+    planType: 'pro_early',
+    quotaLimit: 50,
+    quotaRemaining: 50
   }
 ];
 
@@ -102,7 +114,10 @@ export function registerUser(displayName: string, email: string, passwordHash: s
     displayName: cleanName,
     email: cleanEmail,
     role: 'teacher', // Chặn tuyệt đối không cho phép gán quyền admin từ phía máy khách
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    planType: 'free',
+    quotaLimit: 3,
+    quotaRemaining: 3
   };
 
   // Lưu thông tin đăng nhập (mật khẩu) giả lập trong local storage

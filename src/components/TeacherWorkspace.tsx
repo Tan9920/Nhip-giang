@@ -8,6 +8,8 @@ import { LessonPlan, DataStatus, DataStatusLabels, LessonClassification, LessonC
 import { checkSubjectTerminology, createEmptyScaffold } from '../lib/templates';
 import { exportLessonToWord } from '../lib/exporter';
 import { useRuleValidator } from '../hooks/useRuleValidator';
+import { useQuotaGuard } from '../hooks/useQuotaGuard';
+import { UserAccount } from '../lib/auth/authService';
 import { 
   Calendar, BookOpen, Plus, Download, ChevronRight, FileText, 
   HelpCircle, AlertTriangle, AlertCircle, Save, X, Edit3, Eye, CheckCircle,
@@ -20,9 +22,28 @@ interface TeacherWorkspaceProps {
   onAddPlan: (plan: LessonPlan) => void;
   onUpdatePlan: (plan: LessonPlan) => void;
   activeTeacherId: string;
+  onNavigateToPlans?: () => void;
+  currentUser?: UserAccount | null;
+  onRefreshUser?: () => void;
 }
 
-export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan, activeTeacherId }: TeacherWorkspaceProps) {
+export default function TeacherWorkspace({ 
+  lessonPlans, 
+  onAddPlan, 
+  onUpdatePlan, 
+  activeTeacherId,
+  onNavigateToPlans,
+  currentUser,
+  onRefreshUser
+}: TeacherWorkspaceProps) {
+  // Quota validation hook
+  const { checkAndDeductQuota, showQuotaModal, setShowQuotaModal, userQuotaInfo, refreshQuotaInfo } = useQuotaGuard();
+
+  // Sync quota info whenever user triggers login or edits
+  useEffect(() => {
+    refreshQuotaInfo();
+  }, [currentUser, refreshQuotaInfo]);
+
   // Trạng thái cho nhân bản/phiên bản & thông báo
   const [isActionLoading, setIsActionLoading] = useState<boolean>(false);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
@@ -839,36 +860,98 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
           /* ================== GIAO DIỆN DASHBOARD GIÁO VIÊN ================== */
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" id="dashboard-view">
           
-          {/* Lịch tuần cơ bản */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm lg:col-span-1 flex flex-col" id="weekly-calendar-card">
-            <h3 className="font-display font-extrabold text-slate-900 text-lg mb-5 flex items-center gap-2.5">
-              <div className="p-2 bg-emerald-50 rounded-xl">
-                <Calendar className="w-5 h-5 text-emerald-600" />
+          {/* Lịch tuần cơ bản & Hạn ngạch */}
+          <div className="lg:col-span-1 space-y-6 flex flex-col">
+            {/* Hộp quản lý hạn ngạch */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 font-sans" id="quota-dashboard-card">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <h3 className="font-display font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                  <Shield className="w-4.5 h-4.5 text-emerald-600" />
+                  Hạn ngạch xuất bản
+                </h3>
+                <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border ${
+                  userQuotaInfo?.planType === 'pro_early' 
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200/60' 
+                    : 'bg-slate-50 text-slate-600 border-slate-200'
+                }`}>
+                  {userQuotaInfo?.planType === 'pro_early' ? 'Pro Early' : 'Miễn phí'}
+                </span>
               </div>
-              Lịch dạy tuần này
-            </h3>
-            
-            <div className="space-y-4 flex-1">
-              {mockWeeklyCalendar.map((item, idx) => (
-                <div key={idx} className="p-4 bg-slate-50/60 hover:bg-slate-50 border border-slate-100 hover:border-slate-200 rounded-xl flex items-start gap-3.5 transition-all duration-150 group">
-                  <div className="bg-gradient-to-br from-emerald-600 to-teal-600 text-white text-[10px] font-mono font-extrabold px-2.5 py-1.5 rounded-lg shrink-0 shadow-xs">
-                    {item.day}
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-xs font-bold text-slate-500 group-hover:text-slate-700 transition-colors">
-                      {item.period} • <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md font-mono text-[10px]">{item.class}</span>
-                    </div>
-                    <div className="text-sm font-bold text-slate-800 line-clamp-2 leading-snug">{item.topic}</div>
-                    <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span> Phân môn: {item.subject}
-                    </div>
-                  </div>
+              
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs text-slate-600 font-semibold">
+                  <span>Hạn ngạch tuần:</span>
+                  <span className="font-bold text-slate-900">
+                    {userQuotaInfo?.quotaRemaining ?? 3} / {userQuotaInfo?.quotaLimit ?? 3} lượt
+                  </span>
                 </div>
-              ))}
+                {/* Progress bar */}
+                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200/40">
+                  <div 
+                    className={`h-2 rounded-full transition-all duration-500 ${
+                      (userQuotaInfo?.quotaRemaining ?? 3) === 0 
+                        ? 'bg-rose-500' 
+                        : (userQuotaInfo?.quotaRemaining ?? 3) === 1 
+                        ? 'bg-amber-500' 
+                        : 'bg-emerald-500'
+                    }`}
+                    style={{ 
+                      width: `${Math.min(100, Math.max(0, ((userQuotaInfo?.quotaRemaining ?? 3) / (userQuotaInfo?.quotaLimit ?? 3)) * 100))}%` 
+                    }}
+                  />
+                </div>
+              </div>
+              
+              <div className="flex items-center justify-between text-[10px] pt-1">
+                <span className="text-slate-400 font-medium">
+                  {userQuotaInfo?.planType === 'pro_early' ? 'Xuất bản sạch không đóng dấu watermark' : 'Tải xuống Word tự động đóng dấu'}
+                </span>
+                {userQuotaInfo?.planType === 'free' ? (
+                  <button 
+                    onClick={onNavigateToPlans}
+                    className="text-[10px] font-extrabold text-emerald-700 hover:text-emerald-800 underline cursor-pointer bg-transparent border-none p-0 focus:outline-none"
+                  >
+                    Nâng cấp Pro Early
+                  </button>
+                ) : (
+                  <span className="font-bold text-emerald-700 flex items-center gap-0.5">
+                    ✓ Đã mở khóa Pro
+                  </span>
+                )}
+              </div>
             </div>
-            
-            <div className="mt-6 p-4 bg-slate-50/50 rounded-xl text-xs text-slate-500 border border-slate-150 leading-relaxed font-medium">
-              * Lịch giảng dạy được đồng bộ tự động dựa trên biên chế chương trình của Bộ GD&ĐT cùng phân môn môn <strong className="text-emerald-700 font-bold">Công nghệ</strong> mới.
+
+            {/* Lịch tuần cơ bản */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col" id="weekly-calendar-card">
+              <h3 className="font-display font-extrabold text-slate-900 text-lg mb-5 flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-50 rounded-xl">
+                  <Calendar className="w-5 h-5 text-emerald-600" />
+                </div>
+                Lịch dạy tuần này
+              </h3>
+              
+              <div className="space-y-4 flex-1">
+                {mockWeeklyCalendar.map((item, idx) => (
+                  <div key={idx} className="p-4 bg-slate-50/60 hover:bg-slate-50 border border-slate-100 hover:border-slate-200 rounded-xl flex items-start gap-3.5 transition-all duration-150 group">
+                    <div className="bg-gradient-to-br from-emerald-600 to-teal-600 text-white text-[10px] font-mono font-extrabold px-2.5 py-1.5 rounded-lg shrink-0 shadow-xs">
+                      {item.day}
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-xs font-bold text-slate-500 group-hover:text-slate-700 transition-colors">
+                        {item.period} • <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md font-mono text-[10px]">{item.class}</span>
+                      </div>
+                      <div className="text-sm font-bold text-slate-800 line-clamp-2 leading-snug">{item.topic}</div>
+                      <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span> Phân môn: {item.subject}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              <div className="mt-6 p-4 bg-slate-50/50 rounded-xl text-xs text-slate-500 border border-slate-150 leading-relaxed font-medium">
+                * Lịch giảng dạy được đồng bộ tự động dựa trên biên chế chương trình của Bộ GD&ĐT cùng phân môn môn <strong className="text-emerald-700 font-bold">Công nghệ</strong> mới.
+              </div>
             </div>
           </div>
 
@@ -971,7 +1054,10 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
                             <Edit3 className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => exportLessonToWord(plan)}
+                            onClick={() => checkAndDeductQuota(() => {
+                              exportLessonToWord(plan, userQuotaInfo?.planType || 'free');
+                              if (onRefreshUser) onRefreshUser();
+                            })}
                             className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all cursor-pointer border border-transparent hover:border-emerald-100"
                             title="Tải file Word (.doc)"
                           >
@@ -1668,7 +1754,10 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
                 Chỉnh sửa
               </button>
               <button
-                onClick={() => exportLessonToWord(formData)}
+                onClick={() => checkAndDeductQuota(() => {
+                  exportLessonToWord(formData, userQuotaInfo?.planType || 'free');
+                  if (onRefreshUser) onRefreshUser();
+                })}
                 className="inline-flex items-center justify-center bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-bold text-xs px-4.5 py-2 rounded-xl shadow-md shadow-emerald-600/15 hover:shadow-lg transition-all gap-2 cursor-pointer border border-emerald-600/20"
                 id="btn-export-word-preview"
               >
@@ -1869,6 +1958,42 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
           </div>
         </div>
       ) : null}
+
+      {/* Soft Quota Alert Dialog */}
+      {showQuotaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-fade-in" id="quota-warning-dialog">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl p-6 max-w-md w-full space-y-4 animate-scale-in text-center">
+            <div className="mx-auto w-12 h-12 rounded-full bg-rose-50 flex items-center justify-center text-rose-600">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div className="space-y-1.5">
+              <h3 className="font-display font-extrabold text-slate-900 text-lg">Hạn Ngạch Tuần Đã Hết!</h3>
+              <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                Hạn ngạch xuất bản file trong tuần của thầy/cô đã hết. Vui lòng nâng cấp lên gói <strong className="text-emerald-700 font-bold">Pro Early</strong> hoặc đợi hệ thống làm mới hạn ngạch vào tuần kế tiếp.
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+              <button
+                onClick={() => setShowQuotaModal(false)}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all text-xs font-bold cursor-pointer"
+              >
+                Để sau
+              </button>
+              <button
+                onClick={() => {
+                  setShowQuotaModal(false);
+                  if (onNavigateToPlans) {
+                    onNavigateToPlans();
+                  }
+                }}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-bold text-xs shadow-md shadow-emerald-600/10 hover:shadow-lg transition-all cursor-pointer border border-emerald-600/20"
+              >
+                Trải nghiệm Pro Early
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

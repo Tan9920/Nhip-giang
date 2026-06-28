@@ -22,6 +22,7 @@ import LoginPage from './app/(auth)/login/page';
 import TermsPage from './app/(legal)/terms/page';
 import PrivacyPage from './app/(legal)/privacy/page';
 import TeacherLayout from './app/(teacher)/layout';
+import PlansPage from './app/(teacher)/plans/page';
 
 import { 
   getCurrentSession, 
@@ -39,7 +40,7 @@ export default function App() {
 
   const [showDevPanel, setShowDevPanel] = useState<boolean>(false);
 
-  const [currentView, setCurrentView] = useState<'landing' | 'login' | 'register' | 'terms' | 'privacy' | 'workspace'>(() => {
+  const [currentView, setCurrentView] = useState<'landing' | 'login' | 'register' | 'terms' | 'privacy' | 'workspace' | 'plans'>(() => {
     const session = getCurrentSession();
     return session ? 'workspace' : 'landing';
   });
@@ -334,6 +335,17 @@ export default function App() {
           <PrivacyPage onBack={() => setCurrentView(currentUser ? 'workspace' : 'landing')} />
         )}
 
+        {/* VIEW PLANS STATIC PAGE */}
+        {currentView === 'plans' && (
+          <PlansPage 
+            onBack={() => {
+              setCurrentUser(getCurrentSession());
+              setCurrentView('workspace');
+            }} 
+            showToast={showToast} 
+          />
+        )}
+
         {/* VIEW WORKSPACE (CHỈ CHO PHÉP KHI ĐÃ ĐĂNG NHẬP) */}
         {currentView === 'workspace' && (
           <TeacherLayout onRedirect={setCurrentView}>
@@ -343,6 +355,9 @@ export default function App() {
                 onAddPlan={handleAddPlan}
                 onUpdatePlan={handleUpdatePlan}
                 activeTeacherId={activeSessionId}
+                onNavigateToPlans={() => setCurrentView('plans')}
+                currentUser={currentUser}
+                onRefreshUser={() => setCurrentUser(getCurrentSession())}
               />
             )}
 
