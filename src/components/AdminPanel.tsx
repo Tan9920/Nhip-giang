@@ -12,9 +12,10 @@ interface AdminPanelProps {
   lessonPlans: LessonPlan[];
   onUpdateStatus: (id: string, newStatus: DataStatus) => void;
   onDeletePlan: (id: string) => void;
+  activeSession: string;
 }
 
-export default function AdminPanel({ lessonPlans, onUpdateStatus, onDeletePlan }: AdminPanelProps) {
+export default function AdminPanel({ lessonPlans, onUpdateStatus, onDeletePlan, activeSession }: AdminPanelProps) {
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const selectedPlan = lessonPlans.find(p => p.id === selectedPlanId);
 
@@ -35,29 +36,33 @@ export default function AdminPanel({ lessonPlans, onUpdateStatus, onDeletePlan }
     <div className="space-y-6" id="admin-panel-container">
       {/* Ban lãnh đạo / Thống kê */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs" id="admin-stat-summary">
-          <div className="flex items-center space-x-3 text-slate-800 font-medium mb-3">
-            <BarChart2 className="w-5 h-5 text-emerald-600" />
-            <h3 className="font-display font-semibold text-lg">Tổng Quan Kho Học Liệu</h3>
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm" id="admin-stat-summary">
+          <div className="flex items-center space-x-3 text-slate-800 font-bold mb-3">
+            <div className="p-2 bg-emerald-50 rounded-xl">
+              <BarChart2 className="w-5 h-5 text-emerald-600" />
+            </div>
+            <h3 className="font-display font-extrabold text-slate-900 text-lg">Kho Học Liệu Số</h3>
           </div>
-          <p className="text-3xl font-bold text-slate-900 mb-1">{totalPlans}</p>
-          <p className="text-sm text-slate-500">Giáo án hiện có trên môi trường bộ nhớ đệm</p>
+          <p className="text-4xl font-extrabold text-slate-900 mb-1">{totalPlans}</p>
+          <p className="text-xs text-slate-500 font-medium">Kế hoạch bài giảng trong bộ nhớ đệm</p>
         </div>
 
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs col-span-2" id="admin-stat-distribution">
-          <div className="flex items-center space-x-3 text-slate-800 font-medium mb-3">
-            <ShieldCheck className="w-5 h-5 text-emerald-600" />
-            <h3 className="font-display font-semibold text-lg">Phân Phối Nhãn Trạng Thái Dữ Liệu</h3>
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm col-span-2" id="admin-stat-distribution">
+          <div className="flex items-center space-x-3 text-slate-800 font-bold mb-4">
+            <div className="p-2 bg-emerald-50 rounded-xl">
+              <ShieldCheck className="w-5 h-5 text-emerald-600" />
+            </div>
+            <h3 className="font-display font-extrabold text-slate-900 text-lg">Trạng Thái Thẩm Định Giáo Án</h3>
           </div>
-          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 text-center">
             {Object.entries(DataStatusLabels).map(([status, info]) => {
               const count = statusStats[status as DataStatus] || 0;
               return (
-                <div key={status} className="p-2 bg-slate-50 rounded-lg border border-slate-100">
-                  <span className={`inline-block px-1.5 py-0.5 rounded-sm text-[10px] font-mono border ${info.color}`}>
+                <div key={status} className="p-3 bg-slate-50 hover:bg-slate-50/80 border border-slate-100 rounded-xl transition-all shadow-3xs flex flex-col justify-between">
+                  <span className={`inline-block px-2 py-0.5 rounded-md text-[9px] font-mono border font-bold ${info.color}`}>
                     {info.label}
                   </span>
-                  <div className="text-lg font-bold text-slate-900 mt-1">{count}</div>
+                  <div className="text-xl font-extrabold text-slate-900 mt-2">{count}</div>
                 </div>
               );
             })}
@@ -67,14 +72,19 @@ export default function AdminPanel({ lessonPlans, onUpdateStatus, onDeletePlan }
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Danh sách giáo án cần kiểm duyệt */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 lg:col-span-1" id="admin-lessons-list">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display font-semibold text-lg text-slate-900">Danh Sách Giáo Án</h3>
-            <span className="px-2 py-1 text-xs bg-emerald-50 text-emerald-700 rounded-full font-mono font-medium">ADMIN MODE</span>
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 lg:col-span-1" id="admin-lessons-list">
+          <div className="flex items-center justify-between mb-5 pb-1 border-b border-slate-100">
+            <h3 className="font-display font-extrabold text-slate-900 text-lg">Phiếu thẩm định</h3>
+            <span className="px-2.5 py-1 text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200/50 rounded-full font-mono font-bold uppercase tracking-wider">
+              Admin Mode
+            </span>
           </div>
           
           {lessonPlans.length === 0 ? (
-            <p className="text-sm text-slate-500 py-6 text-center">Chưa có giáo án nào để kiểm duyệt.</p>
+            <div className="text-center py-10 text-slate-400">
+              <BookOpen className="w-10 h-10 mx-auto text-slate-300 stroke-1.5 mb-2" />
+              <p className="text-xs font-bold">Chưa có giáo án để kiểm duyệt</p>
+            </div>
           ) : (
             <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
               {lessonPlans.map(plan => {
@@ -85,32 +95,48 @@ export default function AdminPanel({ lessonPlans, onUpdateStatus, onDeletePlan }
                   <button
                     key={plan.id}
                     onClick={() => setSelectedPlanId(plan.id)}
-                    className={`w-full text-left p-3.5 rounded-lg border transition-all duration-200 block ${
+                    className={`w-full text-left p-4 rounded-xl border transition-all duration-150 block cursor-pointer ${
                       selectedPlanId === plan.id
-                        ? 'border-emerald-600 bg-emerald-50/50 shadow-xs'
-                        : 'border-slate-200 hover:border-slate-300 bg-slate-50/30'
+                        ? 'border-emerald-600 bg-emerald-50/50 shadow-xs ring-2 ring-emerald-500/10'
+                        : 'border-slate-200 hover:border-slate-300 bg-slate-50/30 hover:bg-slate-50'
                     }`}
                   >
-                    <div className="flex justify-between items-start gap-2 mb-1.5">
-                      <span className="font-mono text-[10px] text-slate-500">{plan.grade}</span>
-                      <span className={`px-1.5 py-0.5 rounded-sm text-[9px] font-mono border ${statusInfo.color}`}>
+                    <div className="flex justify-between items-center gap-2 mb-2">
+                      <span className="font-mono text-[10px] font-bold text-slate-500">Khối: {plan.grade}</span>
+                      <span className={`px-2 py-0.5 rounded-md text-[9px] font-mono border font-bold ${statusInfo.color}`}>
                         {statusInfo.label}
                       </span>
                     </div>
-                    <h4 className="font-medium text-slate-900 text-sm line-clamp-1 mb-1">{plan.title}</h4>
+                    <h4 className="font-bold text-slate-900 text-sm line-clamp-1 mb-2 leading-snug">{plan.title}</h4>
                     
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-slate-500 font-medium">Môn: {plan.subject}</span>
+                    <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-100/50">
+                      <span className="text-slate-500 font-semibold truncate max-w-[120px]">Môn: {plan.subject}</span>
                       {termCheck.errors.length > 0 ? (
-                        <span className="flex items-center text-rose-600 text-[10px] font-medium">
-                          <AlertCircle className="w-3.5 h-3.5 mr-0.5" /> Sai thuật ngữ
+                        <span className="flex items-center text-rose-700 text-[10px] font-bold">
+                          <AlertCircle className="w-3.5 h-3.5 mr-1 shrink-0 text-rose-600" /> Sai chuẩn
                         </span>
                       ) : (
-                        <span className="text-emerald-600 text-[10px] font-medium flex items-center">
-                          <ShieldCheck className="w-3.5 h-3.5 mr-0.5" /> Chuẩn GDPT 2018
+                        <span className="text-emerald-700 text-[10px] font-bold flex items-center">
+                          <ShieldCheck className="w-3.5 h-3.5 mr-1 shrink-0 text-emerald-600" /> Đúng chuẩn
                         </span>
                       )}
                     </div>
+
+                    {plan.status === DataStatus.SCAFFOLD && (
+                      <div className="mt-2.5 pt-2 border-t border-slate-100">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUpdateStatus(plan.id, DataStatus.VERIFIED);
+                          }}
+                          className="w-full inline-flex items-center justify-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] py-1.5 px-3 rounded-md transition-all cursor-pointer shadow-2xs"
+                          id={`btn-approve-${plan.id}`}
+                        >
+                          <FileCheck2 className="w-3.5 h-3.5" />
+                          Duyệt chuyên môn
+                        </button>
+                      </div>
+                    )}
                   </button>
                 );
               })}
@@ -139,6 +165,25 @@ export default function AdminPanel({ lessonPlans, onUpdateStatus, onDeletePlan }
                   </button>
                 </div>
               </div>
+
+              {selectedPlan.status === DataStatus.SCAFFOLD && (
+                <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-center gap-3" id="quick-approve-banner">
+                  <div className="flex gap-2.5 items-start">
+                    <FileCheck2 className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
+                    <div>
+                      <h4 className="font-semibold text-sm text-emerald-900">Bài soạn đang ở trạng thái nháp nhãn "scaffold"</h4>
+                      <p className="text-xs text-emerald-700">Bài viết này đã sẵn sàng để thẩm định và phê duyệt lên nhãn "verified".</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => onUpdateStatus(selectedPlan.id, DataStatus.VERIFIED)}
+                    className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-lg shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    <FileCheck2 className="w-4 h-4" />
+                    Duyệt chuyên môn ngay
+                  </button>
+                </div>
+              )}
 
               {/* Rà soát quy tắc giáo dục - RULE-BASED CHECKER */}
               <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-4">

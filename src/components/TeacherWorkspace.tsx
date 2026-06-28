@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LessonPlan, DataStatus, DataStatusLabels, LessonClassification, LessonClassificationLabels } from '../types';
 import { checkSubjectTerminology, createEmptyScaffold } from '../lib/templates';
 import { exportLessonToWord } from '../lib/exporter';
+import { useRuleValidator } from '../hooks/useRuleValidator';
 import { 
   Calendar, BookOpen, Plus, Download, ChevronRight, FileText, 
   HelpCircle, AlertTriangle, AlertCircle, Save, X, Edit3, Eye, CheckCircle 
@@ -20,13 +21,101 @@ interface TeacherWorkspaceProps {
 }
 
 export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan, activeTeacherId }: TeacherWorkspaceProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [isPreviewing, setIsPreviewing] = useState(false);
-  const [selectedPlan, setSelectedPlan] = useState<LessonPlan | null>(null);
+  // Tải lại tiến độ soạn bài dở từ Local Storage khi khởi chạy
+  const [isEditing, setIsEditing] = useState<boolean>(() => {
+    return localStorage.getItem('nhip_giang_is_editing') === 'true';
+  });
+  const [isPreviewing, setIsPreviewing] = useState<boolean>(() => {
+    return localStorage.getItem('nhip_giang_is_previewing') === 'true';
+  });
+  const [activeFormTab, setActiveFormTab] = useState<number>(() => {
+    const saved = localStorage.getItem('nhip_giang_active_form_tab');
+    return saved ? parseInt(saved, 10) : 1;
+  });
   
-  // Trạng thái Form soạn giáo án
-  const [formData, setFormData] = useState<LessonPlan | null>(null);
-  const [activeFormTab, setActiveFormTab] = useState<number>(1); // Hoạt động từ phần I đến VIII
+  // Trạng thái giáo án đang chọn
+  const [selectedPlan, setSelectedPlan] = useState<LessonPlan | null>(() => {
+    const savedId = localStorage.getItem('nhip_giang_selected_plan_id');
+    if (savedId) {
+      return lessonPlans.find(p => p.id === savedId) || null;
+    }
+    return null;
+  });
+  
+  // Trạng thái Form soạn giáo án (Chứa dữ liệu nhập động)
+  const [formData, setFormData] = useState<LessonPlan | null>(() => {
+    const savedDraft = localStorage.getItem('nhip_giang_active_draft');
+    if (savedDraft) {
+      try {
+        return JSON.parse(savedDraft);
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  });
+
+  // Kích hoạt Bộ kiểm tra quy tắc thời gian thực (Real-Time Rule Validator Hook)
+  const { hasWarning, warningMessage } = useRuleValidator(formData);
+
+  const isAdmin = activeTeacherId === 'admin';
+
+  // Lưu trữ các cấu trúc trạng thái UI khi thay đổi
+  useEffect(() => {
+    localStorage.setItem('nhip_giang_is_editing', isEditing.toString());
+  }, [isEditing]);
+
+  useEffect(() => {
+    localStorage.setItem('nhip_giang_is_previewing', isPreviewing.toString());
+  }, [isPreviewing]);
+
+  useEffect(() => {
+    localStorage.setItem('nhip_giang_active_form_tab', activeFormTab.toString());
+  }, [activeFormTab]);
+
+  useEffect(() => {
+    if (selectedPlan) {
+      localStorage.setItem('nhip_giang_selected_plan_id', selectedPlan.id);
+    } else {
+      localStorage.removeItem('nhip_giang_selected_plan_id');
+    }
+  }, [selectedPlan]);
+
+  // Cô lập trạng thái khi chuyển đổi giáo viên/admin
+  useEffect(() => {
+    setIsEditing(false);
+    setIsPreviewing(false);
+    setFormData(null);
+    setSelectedPlan(null);
+    localStorage.removeItem('nhip_giang_is_editing');
+    localStorage.removeItem('nhip_giang_is_previewing');
+    localStorage.removeItem('nhip_giang_active_draft');
+    localStorage.removeItem('nhip_giang_selected_plan_id');
+  }, [activeTeacherId]);
+
+  // Cơ chế Tự động lưu (Auto-save) debounce 1.5 giây
+  useEffect(() => {
+    if (!isEditing || !formData) return;
+
+    const timer = setTimeout(() => {
+      // 1. Lưu bản nháp
+      localStorage.setItem('nhip_giang_active_draft', JSON.stringify(formData));
+
+      // 2. Tự động đồng bộ lên tầng lưu trữ chính ở App.tsx
+      const updated = {
+        ...formData,
+        title: formData.part1.lessonTitle || 'Giáo án mới',
+        grade: formData.grade,
+        subject: formData.part1.subjectName,
+        duration: formData.part1.duration,
+        updatedAt: new Date().toISOString()
+      };
+      
+      onUpdatePlan(updated);
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [formData, isEditing]);
 
   // Xử lý tạo giáo án mới
   const handleCreateNew = () => {
@@ -139,65 +228,81 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
   return (
     <div className="space-y-6" id="teacher-workspace-container">
       {/* Cảnh báo cứng luôn xuất hiện trên đỉnh trang học tập theo yêu cầu pháp lý */}
-      <div className="bg-amber-50 text-amber-900 px-4 py-3.5 rounded-xl border border-amber-200 text-xs flex items-center gap-3 shadow-2xs" id="fixed-legal-advisory">
-        <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
-        <p className="leading-relaxed font-medium">
-          <strong>Thông điệp kiểm duyệt bắt buộc:</strong> Nội dung này là dữ liệu mẫu/tham khảo, giáo viên cần kiểm tra trước khi dùng chính thức trong môi trường giáo dục của nhà trường.
-        </p>
+      <div className="bg-amber-50 border border-amber-200/80 rounded-2xl p-4.5 text-xs flex items-start gap-3.5 shadow-xs" id="fixed-legal-advisory">
+        <div className="bg-amber-100 p-1.5 rounded-lg shrink-0">
+          <AlertTriangle className="w-5 h-5 text-amber-700" />
+        </div>
+        <div className="space-y-0.5">
+          <span className="font-bold text-amber-950 uppercase tracking-wider block text-[10px]">
+            Thông báo Pháp lý & Nghiệm vụ Bắt buộc
+          </span>
+          <p className="text-amber-900/90 leading-relaxed font-semibold">
+            Nội dung hiển thị là dữ liệu mẫu / tham chiếu sư phạm theo chuẩn. Giáo viên bắt buộc phải tự rà soát, điều chỉnh thực tế dựa trên điều kiện giáo dục của nhà trường trước khi triển khai giảng dạy chính thức.
+          </p>
+        </div>
       </div>
 
       {!isEditing && !isPreviewing ? (
         /* ================== GIAO DIỆN DASHBOARD GIÁO VIÊN ================== */
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" id="dashboard-view">
+          
           {/* Lịch tuần cơ bản */}
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs lg:col-span-1" id="weekly-calendar-card">
-            <h3 className="font-display font-semibold text-lg text-slate-900 mb-4 flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-emerald-600" />
-              Lịch Giảng Dạy Tuần Này
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm lg:col-span-1 flex flex-col" id="weekly-calendar-card">
+            <h3 className="font-display font-extrabold text-slate-900 text-lg mb-5 flex items-center gap-2.5">
+              <div className="p-2 bg-emerald-50 rounded-xl">
+                <Calendar className="w-5 h-5 text-emerald-600" />
+              </div>
+              Lịch dạy tuần này
             </h3>
             
-            <div className="space-y-3">
+            <div className="space-y-4 flex-1">
               {mockWeeklyCalendar.map((item, idx) => (
-                <div key={idx} className="p-3.5 bg-slate-50 border border-slate-100 rounded-lg flex items-start gap-3">
-                  <div className="bg-emerald-100 text-emerald-800 text-xs font-mono font-bold px-2 py-1 rounded-sm shrink-0">
+                <div key={idx} className="p-4 bg-slate-50/60 hover:bg-slate-50 border border-slate-100 hover:border-slate-200 rounded-xl flex items-start gap-3.5 transition-all duration-150 group">
+                  <div className="bg-gradient-to-br from-emerald-600 to-teal-600 text-white text-[10px] font-mono font-extrabold px-2.5 py-1.5 rounded-lg shrink-0 shadow-xs">
                     {item.day}
                   </div>
-                  <div>
-                    <div className="text-xs font-semibold text-slate-700">{item.period} • Lớp {item.class}</div>
-                    <div className="text-sm font-medium text-slate-900 line-clamp-1 mt-0.5">{item.topic}</div>
-                    <div className="text-[10px] text-slate-500 font-mono mt-1">Phân môn: {item.subject}</div>
+                  <div className="space-y-1">
+                    <div className="text-xs font-bold text-slate-500 group-hover:text-slate-700 transition-colors">
+                      {item.period} • <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md font-mono text-[10px]">{item.class}</span>
+                    </div>
+                    <div className="text-sm font-bold text-slate-800 line-clamp-2 leading-snug">{item.topic}</div>
+                    <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span> Phân môn: {item.subject}
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
             
-            <div className="mt-5 p-3 bg-slate-50 rounded-lg text-[11px] text-slate-500 border border-slate-200/60 leading-relaxed">
-              * Lịch tuần hiển thị dựa trên lịch biên chế của Bộ GD&ĐT phối hợp cùng phân môn môn <strong>Công nghệ</strong> chuẩn.
+            <div className="mt-6 p-4 bg-slate-50/50 rounded-xl text-xs text-slate-500 border border-slate-150 leading-relaxed font-medium">
+              * Lịch giảng dạy được đồng bộ tự động dựa trên biên chế chương trình của Bộ GD&ĐT cùng phân môn môn <strong className="text-emerald-700 font-bold">Công nghệ</strong> mới.
             </div>
           </div>
 
           {/* Danh sách giáo án hiện có */}
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs lg:col-span-2 space-y-4" id="lesson-plans-list-card">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-              <div>
-                <h3 className="font-display font-semibold text-lg text-slate-900">Không Gian Bài Soạn Cá Nhân</h3>
-                <p className="text-xs text-slate-500 mt-1">Quản lý và điều chỉnh giáo án 8 phần chuẩn Bộ Giáo dục</p>
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm lg:col-span-2 space-y-5" id="lesson-plans-list-card">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+              <div className="space-y-1">
+                <h3 className="font-display font-extrabold text-slate-900 text-xl tracking-tight">Không gian bài soạn cá nhân</h3>
+                <p className="text-xs text-slate-500 font-medium">Quản lý và cập nhật hồ sơ giáo án 8 phần chuẩn Bộ Giáo dục</p>
               </div>
               <button
                 onClick={handleCreateNew}
-                className="inline-flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm px-4 py-2.5 rounded-lg shadow-xs transition-all duration-150 shrink-0 gap-2"
+                className="inline-flex items-center justify-center bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-bold text-xs py-3 px-5 rounded-xl shadow-md shadow-emerald-600/15 hover:shadow-lg transition-all duration-150 shrink-0 gap-2 cursor-pointer border border-emerald-600/30"
                 id="btn-create-new"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-4.5 h-4.5" />
                 Soạn giáo án mới
               </button>
             </div>
 
             {lessonPlans.length === 0 ? (
-              <div className="text-center py-12 text-slate-400">
-                <BookOpen className="w-12 h-12 mx-auto stroke-1 mb-2 text-slate-300" />
-                <p className="text-sm font-medium">Chưa có bài giảng nào được soạn thảo.</p>
-                <p className="text-xs text-slate-400 mt-1">Hãy bấm "Soạn giáo án mới" để khởi tạo bài học.</p>
+              <div className="text-center py-16 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200 text-slate-400">
+                <div className="p-4 bg-white rounded-full inline-block shadow-xs border border-slate-100 mb-3.5">
+                  <BookOpen className="w-10 h-10 stroke-1.5 text-slate-300" />
+                </div>
+                <p className="text-sm font-bold text-slate-600">Chưa có bài giảng nào được khởi tạo</p>
+                <p className="text-xs text-slate-400 mt-1.5 max-w-sm mx-auto leading-relaxed">Hãy bấm nút "Soạn giáo án mới" phía trên để tạo bản thảo giáo án 8 phần đầu tiên của bạn.</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -208,60 +313,66 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
                   return (
                     <div 
                       key={plan.id}
-                      className="p-4 rounded-xl border border-slate-200 hover:border-emerald-200 bg-white hover:shadow-xs transition-all duration-200 flex flex-col justify-between"
+                      className="p-5 rounded-2xl border border-slate-200 hover:border-emerald-300/80 bg-white hover:shadow-md transition-all duration-200 flex flex-col justify-between group relative overflow-hidden"
                     >
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-[10px] font-mono font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-sm">
-                            {plan.grade}
+                      <div className="space-y-3.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-mono font-bold text-slate-600 bg-slate-100 border border-slate-200/50 px-2.5 py-1 rounded-md">
+                            Khối: {plan.grade}
                           </span>
-                          <span className={`px-2 py-0.5 rounded-sm text-[9px] font-mono border font-medium ${statusInfo.color}`} title={statusInfo.desc}>
+                          <span className={`px-2.5 py-1 rounded-md text-[9px] font-mono border font-bold ${statusInfo.color}`} title={statusInfo.desc}>
                             {statusInfo.label}
                           </span>
                         </div>
                         
-                        <h4 className="font-display font-semibold text-slate-900 text-sm line-clamp-2 min-h-[40px]">
+                        <h4 className="font-display font-extrabold text-slate-900 text-sm sm:text-base line-clamp-2 min-h-[44px] group-hover:text-emerald-700 transition-colors leading-snug">
                           {plan.title}
                         </h4>
                         
-                        <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
-                          <span>Môn: <strong>{plan.subject}</strong></span>
-                          <span>{plan.duration}</span>
+                        <div className="grid grid-cols-2 gap-2 text-xs font-semibold text-slate-500 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                          <div>
+                            <span className="text-[10px] text-slate-400 block font-normal">Môn học</span>
+                            <span className="text-slate-800 line-clamp-1 font-bold">{plan.subject}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-slate-400 block font-normal">Thời lượng</span>
+                            <span className="text-slate-800 line-clamp-1 font-bold">{plan.duration}</span>
+                          </div>
                         </div>
 
                         {termCheck.errors.length > 0 ? (
-                          <div className="mt-2.5 py-1 px-2 bg-rose-50 text-rose-700 border border-rose-200/50 rounded-sm text-[10px] flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3 shrink-0" />
-                            <span>Sai chuẩn thuật ngữ</span>
+                          <div className="py-1.5 px-3 bg-rose-50 text-rose-700 border border-rose-100 rounded-lg text-[10px] flex items-center gap-1.5 font-bold">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0 text-rose-600" />
+                            <span>Sai quy chuẩn thuật ngữ GDPT</span>
                           </div>
                         ) : (
-                          <div className="mt-2.5 py-1 px-2 bg-emerald-50 text-emerald-700 border border-emerald-200/50 rounded-sm text-[10px] flex items-center gap-1">
-                            <CheckCircle className="w-3 h-3 shrink-0" />
+                          <div className="py-1.5 px-3 bg-emerald-50 text-emerald-800 border border-emerald-100 rounded-lg text-[10px] flex items-center gap-1.5 font-bold">
+                            <CheckCircle className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
                             <span>Chuẩn môn Công nghệ GDPT</span>
                           </div>
                         )}
                       </div>
 
-                      <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                      <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
                         <button
                           onClick={() => handleSelectPlan(plan)}
-                          className="text-xs text-emerald-600 hover:text-emerald-700 font-semibold inline-flex items-center gap-1"
+                          className="text-xs text-emerald-600 hover:text-emerald-800 font-extrabold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                         >
                           Xem chi tiết
-                          <ChevronRight className="w-3.5 h-3.5" />
+                          <ChevronRight className="w-4 h-4" />
                         </button>
                         
                         <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => handleEditExisting(plan)}
-                            className="p-1.5 text-slate-500 hover:text-emerald-600 rounded-md hover:bg-slate-50 transition-all"
+                            className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all cursor-pointer border border-transparent hover:border-emerald-100"
                             title="Sửa giáo án"
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => exportLessonToWord(plan)}
-                            className="p-1.5 text-slate-500 hover:text-emerald-600 rounded-md hover:bg-slate-50 transition-all"
+                            className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all cursor-pointer border border-transparent hover:border-emerald-100"
                             title="Tải file Word (.doc)"
                           >
                             <Download className="w-4 h-4" />
@@ -277,87 +388,112 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
         </div>
       ) : isEditing && formData ? (
         /* ================== TRÌNH SOẠN THẢO GIÁO ÁN 8 PHẦN ================== */
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" id="editor-view">
-          {/* Editor Header */}
-          <div className="bg-slate-900 text-white p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 bg-emerald-600 text-white text-[10px] font-mono font-bold rounded-sm">
-                  KHUNG CHUẨN 5512
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden" id="editor-view">
+          {/* Elegant Editor Header */}
+          <div className="bg-gradient-to-r from-slate-900 to-slate-850 text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800">
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2.5 py-1 bg-emerald-600/90 text-white text-[10px] font-mono font-bold rounded-lg tracking-wide shadow-xs">
+                  KHUNG BỘ GD&ĐT 5512
                 </span>
-                <span className="text-xs text-slate-400 font-mono">ID: {formData.id}</span>
+                <span className="text-xs text-slate-400 font-mono">Bài soạn ID: {formData.id}</span>
               </div>
-              <h3 className="font-display font-semibold text-lg mt-1 text-slate-100">
-                {formData.part1.lessonTitle || 'Đang soạn bài mới...'}
+              <h3 className="font-display font-extrabold text-base sm:text-lg text-slate-100 leading-tight">
+                {formData.part1.lessonTitle || 'Khởi soạn giáo án mới...'}
               </h3>
             </div>
             
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-auto">
               <button
                 onClick={() => {
                   setIsEditing(false);
                   setIsPreviewing(selectedPlan ? true : false);
+                  localStorage.removeItem('nhip_giang_active_draft');
+                  setFormData(selectedPlan ? JSON.parse(JSON.stringify(selectedPlan)) : null);
                 }}
-                className="px-3.5 py-1.5 text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-all"
+                className="px-4 py-2 text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-750 border border-slate-700/80 rounded-xl transition-all cursor-pointer"
               >
-                Hủy bỏ
+                {isAdmin ? 'Quay lại' : 'Hủy bỏ'}
               </button>
-              <button
-                onClick={handleSave}
-                className="inline-flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs px-4 py-1.5 rounded-lg shadow-2xs transition-all gap-1.5"
-                id="btn-save-plan"
-              >
-                <Save className="w-3.5 h-3.5" />
-                Lưu giáo án
-              </button>
+              {!isAdmin && (
+                <button
+                  onClick={handleSave}
+                  className="inline-flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-4.5 py-2 rounded-xl shadow-md shadow-emerald-600/20 hover:shadow-lg transition-all gap-2 cursor-pointer border border-emerald-500/20"
+                  id="btn-save-plan"
+                >
+                  <Save className="w-4 h-4" />
+                  Lưu giáo án
+                </button>
+              )}
+              {isAdmin && (
+                <span className="px-3.5 py-2 bg-amber-500/10 text-amber-300 border border-amber-500/25 text-xs font-bold rounded-xl">
+                  Chế độ Xem (Admin)
+                </span>
+              )}
             </div>
           </div>
 
-          {/* Cảnh báo trong trình soạn thảo */}
-          <div className="bg-yellow-50 text-yellow-900 border-b border-yellow-200 px-5 py-3 text-xs flex items-center gap-2">
-            <AlertCircle className="w-4.5 h-4.5 text-yellow-600 shrink-0" />
-            <span>
-              <strong>Lưu ý nghiệp vụ:</strong> Tên môn học chính thức theo chương trình giáo dục phổ thông mới bắt buộc dùng từ <strong>"Công nghệ"</strong>. Từ "kĩ thuật" chỉ được dùng cho kĩ thuật dạy học sư phạm.
-            </span>
-          </div>
+          {/* Cảnh báo trong trình soạn thảo - Dynamic Warning Banner */}
+          {hasWarning && (
+            <div className="bg-amber-50/80 text-amber-950 border-b border-amber-100 px-5 sm:px-6 py-4 text-xs flex items-start gap-3 animate-fade-in" id="soft-warning-alert-banner">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <strong className="text-amber-950 block font-bold tracking-wider uppercase text-[10px]">Cảnh báo quy chuẩn giáo khoa sư phạm:</strong>
+                <p className="leading-relaxed font-semibold">
+                  {warningMessage}
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-4 min-h-[500px]">
-            {/* Thanh điều hướng 8 Phần (Sidebar Menu) */}
-            <div className="bg-slate-50 border-r border-slate-200 p-4 space-y-1 md:col-span-1">
-              <p className="text-[10px] font-bold text-slate-400 tracking-wider uppercase px-2 mb-3">Phân đoạn giáo án</p>
+            {/* Adaptive Stepper (Horizontal on mobile, vertical sidebar on PC) */}
+            <div className="bg-slate-50 border-b md:border-b-0 md:border-r border-slate-200/80 p-4 flex flex-row md:flex-col gap-1.5 overflow-x-auto md:overflow-x-visible md:space-y-1 md:col-span-1 scrollbar-thin scrollbar-thumb-slate-200 scroll-smooth snap-x">
+              <div className="hidden md:block text-[10px] font-extrabold text-slate-400 tracking-wider uppercase px-2.5 mb-3">
+                CẤU TRÚC 8 PHẦN
+              </div>
               
               {[
                 { step: 1, name: 'I. Thông tin chung' },
-                { step: 2, name: 'II. Yêu cầu cần đạt' },
-                { step: 3, name: 'III. Thiết bị & Học liệu' },
-                { step: 4, name: 'IV. Phương pháp & Kĩ thuật' },
-                { step: 5, name: 'V. Tiến trình dạy học' },
-                { step: 6, name: 'VI. Kiểm tra, đánh giá' },
+                { step: 2, name: 'II. Yêu cầu đạt' },
+                { step: 3, name: 'III. Thiết bị học liệu' },
+                { step: 4, name: 'IV. Phương pháp dạy' },
+                { step: 5, name: 'V. Tiến trình dạy' },
+                { step: 6, name: 'VI. Kiểm tra đánh giá' },
                 { step: 7, name: 'VII. Phân hóa học sinh' },
-                { step: 8, name: 'VIII. Ghi chú điều chỉnh' },
+                { step: 8, name: 'VIII. Điều chỉnh' },
               ].map(tab => (
                 <button
                   key={tab.step}
                   onClick={() => setActiveFormTab(tab.step)}
-                  className={`w-full text-left px-3 py-2 text-xs rounded-lg font-medium transition-all block ${
+                  className={`shrink-0 md:shrink snap-center text-left px-3.5 py-2.5 text-xs rounded-xl font-bold transition-all flex items-center gap-2 border-b-2 md:border-b-0 md:border-l-3 border-transparent cursor-pointer ${
                     activeFormTab === tab.step
-                      ? 'bg-emerald-50 text-emerald-800 border-l-3 border-emerald-600 font-semibold'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                      ? 'bg-emerald-50 text-emerald-900 border-emerald-600 font-extrabold shadow-3xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/60'
                   }`}
                 >
-                  {tab.name}
+                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono shrink-0 border ${
+                    activeFormTab === tab.step
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-slate-400 border-slate-200'
+                  }`}>
+                    {tab.step}
+                  </span>
+                  <span className="truncate">{tab.name}</span>
                 </button>
               ))}
-
-              <div className="mt-8 p-3 bg-white rounded-lg border border-slate-200 text-[11px] text-slate-500 leading-relaxed">
-                <span className="font-semibold text-slate-700">Nguyên tắc Owner Isolation:</span> Giáo án này được lưu trữ cô lập, mã hóa cục bộ và chỉ có bạn mới có quyền xem hoặc chỉnh sửa.
+              
+              <div className="hidden md:block mt-6 p-4 bg-white rounded-xl border border-slate-200/65 text-[11px] text-slate-500 leading-relaxed shadow-3xs">
+                <span className="font-bold text-slate-700 block mb-1 uppercase tracking-wider text-[9px]">Nguyên tắc bảo mật Owner Isolation:</span>
+                Giáo án này được lưu trữ cô lập, mã hóa cục bộ và chỉ có bạn mới có quyền xem hoặc chỉnh sửa.
               </div>
             </div>
 
             {/* Nội dung chi tiết Form soạn */}
             <div className="p-6 md:col-span-3 space-y-5 overflow-y-auto max-h-[650px]">
               
-              {/* PHẦN I: THÔNG TIN CHUNG */}
+              <fieldset disabled={isAdmin} className="space-y-5">
+                {/* PHẦN I: THÔNG TIN CHUNG */}
               {activeFormTab === 1 && (
                 <div className="space-y-4" id="form-part-1">
                   <div className="border-b border-slate-100 pb-2">
@@ -826,6 +962,8 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
                 </div>
               )}
 
+              </fieldset>
+
               {/* Phím bấm di chuyển qua các phân đoạn */}
               <div className="border-t border-slate-200 pt-5 flex items-center justify-between">
                 <button
@@ -852,47 +990,48 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
         </div>
       ) : isPreviewing && formData ? (
         /* ================== TRÌNH XEM TRƯỚC VÀ XUẤT GIÁO ÁN (PREVIEW) ================== */
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" id="preview-view">
-          {/* Preview Header */}
-          <div className="bg-slate-100 p-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-mono font-bold rounded-sm border border-emerald-200">
-                  XEM TRƯỚC GIÁO ÁN
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden animate-fade-in" id="preview-view">
+          {/* High-Fidelity Preview Header */}
+          <div className="bg-slate-50 p-5 border-b border-slate-200/85 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-[10px] font-mono font-bold rounded-lg border border-emerald-200/60 shadow-3xs uppercase tracking-wider">
+                  Xem trước giáo án chuẩn
                 </span>
-                <span className="text-xs text-slate-500 font-mono">Trạng thái: <strong>{formData.status.toUpperCase()}</strong></span>
+                <span className="text-xs text-slate-500 font-mono">Nhãn dữ liệu: <strong className="text-slate-800 font-bold">{formData.status.toUpperCase()}</strong></span>
               </div>
-              <h3 className="font-display font-semibold text-lg text-slate-950 mt-1">
+              <h3 className="font-display font-extrabold text-base sm:text-lg text-slate-900 leading-tight">
                 {formData.part1.lessonTitle}
               </h3>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
               <button
                 onClick={() => setIsPreviewing(false)}
-                className="px-3.5 py-2 text-xs text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-50 rounded-lg transition-all"
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 rounded-xl transition-all cursor-pointer"
               >
                 Về danh sách
               </button>
               <button
                 onClick={() => handleEditExisting(formData)}
-                className="px-3.5 py-2 text-xs text-slate-600 hover:text-emerald-700 border border-slate-200 hover:border-emerald-200 hover:bg-emerald-50/20 rounded-lg transition-all"
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-emerald-700 border border-slate-200 hover:border-emerald-200 hover:bg-emerald-50/20 rounded-xl transition-all cursor-pointer"
               >
                 Chỉnh sửa
               </button>
               <button
                 onClick={() => exportLessonToWord(formData)}
-                className="inline-flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs px-4 py-2 rounded-lg shadow-xs transition-all gap-1.5"
+                className="inline-flex items-center justify-center bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-bold text-xs px-4.5 py-2 rounded-xl shadow-md shadow-emerald-600/15 hover:shadow-lg transition-all gap-2 cursor-pointer border border-emerald-600/20"
                 id="btn-export-word-preview"
               >
-                <Download className="w-3.5 h-3.5" />
+                <Download className="w-4 h-4" />
                 Xuất file Word
               </button>
             </div>
           </div>
 
-          {/* Chi tiết nội dung giáo án dạng trang giấy 5512 */}
-          <div className="p-8 max-w-4xl mx-auto space-y-8 bg-slate-50/20 border-x border-slate-100" id="lesson-paper-preview">
+          {/* Chi tiết nội dung giáo án dạng trang giấy 5512 - Immersive floating paper workspace */}
+          <div className="bg-slate-100/50 p-4 sm:p-8 md:p-12">
+            <div className="p-5 sm:p-10 md:p-14 max-w-4xl mx-auto space-y-8 bg-white border border-slate-200/80 shadow-lg rounded-2xl" id="lesson-paper-preview">
             
             <div className="text-center font-display uppercase tracking-wider text-xs border-b border-slate-100 pb-3 text-slate-400">
               CỔNG HIỂN THỊ CHUẨN KẾ HOẠCH BÀI DẠY VIỆT NAM
@@ -1077,6 +1216,7 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
                 Cảnh báo tác quyền: Nội dung giáo lý chỉ mang tính chất tham khảo sư phạm. Giáo viên chịu trách nhiệm kiểm duyệt trước khi đưa vào giảng dạy.
               </p>
             </div>
+          </div>
           </div>
         </div>
       ) : null}
