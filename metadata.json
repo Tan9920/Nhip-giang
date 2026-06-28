@@ -1,0 +1,8 @@
+{
+  "name": "Nhịp Giảng",
+  "description": "Không gian làm việc số dành cho giáo viên - Nền tảng soạn giáo án và quản lý học liệu chuyên nghiệp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
