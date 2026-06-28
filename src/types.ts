@@ -15,34 +15,34 @@ export enum DataStatus {
 
 export const DataStatusLabels: Record<DataStatus, { label: string; color: string; desc: string }> = {
   [DataStatus.SEED]: {
-    label: 'seed',
-    color: 'bg-blue-100 text-blue-800 border-blue-200',
-    desc: 'Dữ liệu mẫu khởi tạo bởi hệ thống',
+    label: 'Mẫu chuẩn Bộ GD&ĐT',
+    color: 'bg-blue-50 text-blue-700 border-blue-200/60',
+    desc: 'Dữ liệu mẫu chuẩn từ Bộ Giáo dục và Đào tạo',
   },
   [DataStatus.SCAFFOLD]: {
-    label: 'scaffold',
-    color: 'bg-purple-100 text-purple-800 border-purple-200',
-    desc: 'Giáo án khung tạo tự động từ template engine',
+    label: 'Khung bài soạn',
+    color: 'bg-purple-50 text-purple-700 border-purple-200/60',
+    desc: 'Khung giáo án được chuẩn bị sẵn theo chủ đề Công văn 5512',
   },
   [DataStatus.COMMUNITY]: {
-    label: 'community',
-    color: 'bg-amber-100 text-amber-800 border-amber-200',
-    desc: 'Nội dung do cộng đồng giáo viên đóng góp',
+    label: 'Cộng đồng chia sẻ',
+    color: 'bg-amber-50 text-amber-700 border-amber-200/60',
+    desc: 'Bài soạn tham khảo do giáo viên cộng đồng đóng góp',
   },
   [DataStatus.REVIEWED]: {
-    label: 'reviewed',
-    color: 'bg-indigo-100 text-indigo-800 border-indigo-200',
-    desc: 'Đã rà soát nội bộ hoặc bởi tổ bộ môn',
+    label: 'Tổ chuyên môn duyệt',
+    color: 'bg-indigo-50 text-indigo-700 border-indigo-200/60',
+    desc: 'Đã được thông qua bởi tổ chuyên môn bộ môn của trường',
   },
   [DataStatus.VERIFIED]: {
-    label: 'verified',
-    color: 'bg-teal-100 text-teal-800 border-teal-200',
-    desc: 'Đã xác minh tính tương thích kỹ thuật',
+    label: 'Đã kiểm định',
+    color: 'bg-teal-50 text-teal-700 border-teal-200/60',
+    desc: 'Đã được rà soát và xác nhận tính tương thích quy định sư phạm',
   },
   [DataStatus.APPROVED_FOR_RELEASE]: {
-    label: 'approved_for_release',
-    color: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-    desc: 'Chính thức phê duyệt phát hành giảng dạy',
+    label: 'Chính thức phát hành',
+    color: 'bg-emerald-50 text-emerald-700 border-emerald-200/60',
+    desc: 'Đã phê duyệt ban hành chính thức cho nhà trường giảng dạy',
   },
 };
 
@@ -80,6 +80,23 @@ export interface ProgressionActivity {
   };
 }
 
+// 6 tham số ngữ cảnh sư phạm thực tế (Batch 03)
+export interface PedagogicalContext {
+  classSize: string;      // Ít / trung bình / đông
+  studentLevel: string;   // Cần hỗ trợ / chuẩn / khá / nâng cao
+  equipment: string;      // Không thiết bị / máy chiếu / điện thoại / phòng bộ môn
+  classroomSpace: string; // Phòng cố định / linh hoạt / ngoài lớp
+  durationMin: string;    // 35 phút / 40 phút / 45 phút / 90 phút
+  coreObjective: string;  // Bài mới / luyện tập / ôn tập / dự án / bổ trợ
+}
+
+// Nhật ký phiên bản (Version Control - Batch 03)
+export interface LessonVersion {
+  v: number;
+  content: any; // Bản lưu snapshot đầy đủ của LessonPlan
+  updatedAt: string;
+}
+
 // Cấu trúc Kế hoạch bài dạy (Giáo án) 8 phần chuẩn Việt Nam
 export interface LessonPlan {
   id: string;
@@ -92,6 +109,12 @@ export interface LessonPlan {
   classification: LessonClassification;
   createdAt: string;
   updatedAt: string;
+
+  // Trường bổ sung của Batch 03
+  levelId?: string; // tieu_hoc | thcs | thpt
+  topicName?: string; // Tên chủ đề/Mạch kiến thức
+  context?: PedagogicalContext; // Ngữ cảnh sư phạm lớp học
+  versions?: LessonVersion[]; // Mảng chứa các bản sao lưu phiên bản cũ
 
   // I. Thông tin chung
   part1: {

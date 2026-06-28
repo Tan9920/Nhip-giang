@@ -75,8 +75,8 @@ export default function AdminPanel({ lessonPlans, onUpdateStatus, onDeletePlan, 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 lg:col-span-1" id="admin-lessons-list">
           <div className="flex items-center justify-between mb-5 pb-1 border-b border-slate-100">
             <h3 className="font-display font-extrabold text-slate-900 text-lg">Phiếu thẩm định</h3>
-            <span className="px-2.5 py-1 text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200/50 rounded-full font-mono font-bold uppercase tracking-wider">
-              Admin Mode
+            <span className="px-2.5 py-1 text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200/50 rounded-full font-sans font-bold uppercase tracking-wider">
+              Chế độ Thẩm định
             </span>
           </div>
           
@@ -171,8 +171,8 @@ export default function AdminPanel({ lessonPlans, onUpdateStatus, onDeletePlan, 
                   <div className="flex gap-2.5 items-start">
                     <FileCheck2 className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
                     <div>
-                      <h4 className="font-semibold text-sm text-emerald-900">Bài soạn đang ở trạng thái nháp nhãn "scaffold"</h4>
-                      <p className="text-xs text-emerald-700">Bài viết này đã sẵn sàng để thẩm định và phê duyệt lên nhãn "verified".</p>
+                      <h4 className="font-semibold text-sm text-emerald-900">Giáo án đang ở trạng thái "Khung bài soạn"</h4>
+                      <p className="text-xs text-emerald-700 font-medium">Bài viết này đã sẵn sàng để thẩm định, phê duyệt và nâng cấp lên trạng thái "Đã kiểm định".</p>
                     </div>
                   </div>
                   <button

@@ -4,14 +4,16 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { LessonPlan, DataStatus, DataStatusLabels, LessonClassification, LessonClassificationLabels } from '../types';
+import { LessonPlan, DataStatus, DataStatusLabels, LessonClassification, LessonClassificationLabels, LessonVersion, PedagogicalContext } from '../types';
 import { checkSubjectTerminology, createEmptyScaffold } from '../lib/templates';
 import { exportLessonToWord } from '../lib/exporter';
 import { useRuleValidator } from '../hooks/useRuleValidator';
 import { 
   Calendar, BookOpen, Plus, Download, ChevronRight, FileText, 
-  HelpCircle, AlertTriangle, AlertCircle, Save, X, Edit3, Eye, CheckCircle 
+  HelpCircle, AlertTriangle, AlertCircle, Save, X, Edit3, Eye, CheckCircle,
+  Copy, Clock, RotateCcw, Shield
 } from 'lucide-react';
+import { CURRICULUM_COMPATIBILITY_MATRIX, findCurriculumMatch } from '../lib/curriculum/compatibilityMatrix';
 
 interface TeacherWorkspaceProps {
   lessonPlans: LessonPlan[];
@@ -21,6 +23,34 @@ interface TeacherWorkspaceProps {
 }
 
 export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan, activeTeacherId }: TeacherWorkspaceProps) {
+  // Trạng thái cho nhân bản/phiên bản & thông báo
+  const [isActionLoading, setIsActionLoading] = useState<boolean>(false);
+  const [loadingMessage, setLoadingMessage] = useState<string>('');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const [dismissedAdvisory, setDismissedAdvisory] = useState<boolean>(() => {
+    return localStorage.getItem('nhip_giang_dismissed_advisory') === 'true';
+  });
+
+  // States cho Bộ lựa chọn Ngữ cảnh & Ma trận tương thích
+  const [isCreatingNew, setIsCreatingNew] = useState<boolean>(false);
+  const [selectedLevelId, setSelectedLevelId] = useState<string>('tieu_hoc');
+  const [selectedGradeLabel, setSelectedGradeLabel] = useState<string>('Lớp 3');
+  const [selectedTopicName, setSelectedTopicName] = useState<string>('Công nghệ và đời sống');
+  const [selectedLessonTitle, setSelectedLessonTitle] = useState<string>('Bài 1: Tự nhiên và công nghệ');
+  const [isCustomLesson, setIsCustomLesson] = useState<boolean>(false);
+  const [customLessonTitleInput, setCustomLessonTitleInput] = useState<string>('');
+  const [customTopicNameInput, setCustomTopicNameInput] = useState<string>('');
+
+  const [contextForm, setContextForm] = useState<PedagogicalContext>({
+    classSize: 'Trung bình',
+    studentLevel: 'Chuẩn',
+    equipment: 'Máy chiếu',
+    classroomSpace: 'Phòng cố định',
+    durationMin: '45 phút',
+    coreObjective: 'Bài mới',
+  });
+
   // Tải lại tiến độ soạn bài dở từ Local Storage khi khởi chạy
   const [isEditing, setIsEditing] = useState<boolean>(() => {
     return localStorage.getItem('nhip_giang_is_editing') === 'true';
@@ -117,14 +147,274 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
     return () => clearTimeout(timer);
   }, [formData, isEditing]);
 
-  // Xử lý tạo giáo án mới
-  const handleCreateNew = () => {
-    const newScaffold = createEmptyScaffold(activeTeacherId);
-    setFormData(newScaffold);
-    setSelectedPlan(null);
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type });
+  };
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  // Xử lý thay đổi cấp học, lớp học, chủ đề
+  const handleLevelChange = (levelId: string) => {
+    setSelectedLevelId(levelId);
+    const level = CURRICULUM_COMPATIBILITY_MATRIX.find(l => l.levelId === levelId);
+    if (level && level.grades.length > 0) {
+      const firstGrade = level.grades[0];
+      handleGradeChange(firstGrade.gradeLabel, levelId);
+    }
+  };
+
+  const handleGradeChange = (gradeLabel: string, levelId = selectedLevelId) => {
+    setSelectedGradeLabel(gradeLabel);
+    const level = CURRICULUM_COMPATIBILITY_MATRIX.find(l => l.levelId === levelId);
+    const grade = level?.grades.find(g => g.gradeLabel === gradeLabel);
+    if (grade && grade.topics.length > 0) {
+      const firstTopic = grade.topics[0];
+      handleTopicChange(firstTopic.name, firstTopic.id, grade.topics);
+    } else {
+      setSelectedTopicName('Khác');
+      setSelectedLessonTitle('Khác');
+      setIsCustomLesson(true);
+    }
+  };
+
+  const handleTopicChange = (topicName: string, topicId = '', availableTopics: any[] = []) => {
+    setSelectedTopicName(topicName);
+    if (topicName === 'Khác') {
+      setSelectedLessonTitle('Khác');
+      setIsCustomLesson(true);
+      return;
+    }
+    
+    let topic: any;
+    if (availableTopics.length > 0) {
+      topic = availableTopics.find(t => t.name === topicName);
+    } else {
+      const level = CURRICULUM_COMPATIBILITY_MATRIX.find(l => l.levelId === selectedLevelId);
+      const grade = level?.grades.find(g => g.gradeLabel === selectedGradeLabel);
+      topic = grade?.topics.find(t => t.name === topicName);
+    }
+
+    if (topic && topic.lessons.length > 0) {
+      setSelectedLessonTitle(topic.lessons[0].title);
+      setIsCustomLesson(false);
+    } else {
+      setSelectedLessonTitle('Khác');
+      setIsCustomLesson(true);
+    }
+  };
+
+  // Xác nhận khởi tạo và gán ngữ cảnh sư phạm thực tế
+  const handleConfirmContext = () => {
+    let finalTitle = selectedLessonTitle;
+    let finalTopic = selectedTopicName;
+    let classification = LessonClassification.OFFICIAL_LESSON;
+    let status = DataStatus.SCAFFOLD;
+
+    if (selectedLessonTitle === 'Khác' || isCustomLesson) {
+      finalTitle = customLessonTitleInput.trim();
+      finalTopic = customTopicNameInput.trim() || 'Chủ đề tự chọn';
+      classification = LessonClassification.UNMAPPED;
+    }
+
+    if (!finalTitle) {
+      showToast('Vui lòng nhập tên bài dạy!', 'error');
+      return;
+    }
+
+    const baseScaffold = createEmptyScaffold(activeTeacherId);
+    const newPlan: LessonPlan = {
+      ...baseScaffold,
+      id: `plan_${Date.now()}`,
+      title: finalTitle,
+      grade: selectedGradeLabel,
+      subject: 'Công nghệ',
+      duration: contextForm.durationMin,
+      classification: classification,
+      status: status,
+      levelId: selectedLevelId,
+      topicName: finalTopic,
+      context: { ...contextForm },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      versions: [],
+      part1: {
+        className: `Lớp ${selectedGradeLabel.replace('Lớp ', '')}A1`,
+        subjectName: 'Công nghệ',
+        lessonTitle: finalTitle,
+        duration: contextForm.durationMin,
+      }
+    };
+
+    if (classification === LessonClassification.UNMAPPED) {
+      newPlan.part2 = {
+        knowledgeAndSkills: 'Yêu cầu tự nhập (Chế độ khung cấu trúc an toàn - unmapped)',
+        generalCapacity: 'Yêu cầu tự nhập (Chế độ khung cấu trúc an toàn - unmapped)',
+        specificCapacity: 'Yêu cầu tự nhập (Chế độ khung cấu trúc an toàn - unmapped)',
+        qualities: 'Yêu cầu tự nhập (Chế độ khung cấu trúc an toàn - unmapped)',
+        evaluationEvidence: 'Yêu cầu tự nhập (Chế độ khung cấu trúc an toàn - unmapped)',
+      };
+      newPlan.part3 = {
+        teacherEquipment: 'Thiết bị dạy học của giáo viên...',
+        studentEquipment: 'Học liệu và thiết bị học tập của học sinh...',
+        sources: 'Yêu cầu tự nhập',
+        copyrightLicense: 'Sử dụng phi thương mại',
+      };
+      newPlan.part4 = {
+        methods: 'Phương pháp dạy học giáo viên tự cấu hình...',
+        techniques: 'Kĩ thuật dạy học giáo viên tự cấu hình...',
+      };
+      newPlan.part5 = {
+        warmup: {
+          target: 'Mục tiêu khởi động...',
+          content: 'Nội dung hoạt động khởi động...',
+          product: 'Sản phẩm hoạt động khởi động...',
+          execution: { transfer: '', perform: '', report: '', conclude: '' }
+        },
+        exploration: {
+          target: 'Mục tiêu hình thành kiến thức...',
+          content: 'Nội dung hoạt động hình thành kiến thức...',
+          product: 'Sản phẩm hoạt động hình thành kiến thức...',
+          execution: { transfer: '', perform: '', report: '', conclude: '' }
+        },
+        practice: {
+          target: 'Mục tiêu hoạt động luyện tập...',
+          content: 'Nội dung hoạt động luyện tập...',
+          product: 'Sản phẩm hoạt động luyện tập...',
+          execution: { transfer: '', perform: '', report: '', conclude: '' }
+        },
+        application: {
+          target: 'Mục tiêu hoạt động vận dụng...',
+          content: 'Nội dung hoạt động vận dụng...',
+          product: 'Sản phẩm hoạt động vận dụng...',
+          execution: { transfer: '', perform: '', report: '', conclude: '' }
+        },
+      };
+    } else {
+      newPlan.part2.knowledgeAndSkills = `Học xong bài "${finalTitle}", học sinh đạt được:\n- Kiến thức cốt lõi tương ứng mạch chủ đề "${finalTopic}".\n- Biết cách vận dụng sáng tạo phù hợp ngữ cảnh lớp học chuẩn.`;
+    }
+
+    onAddPlan(newPlan);
+    setFormData(newPlan);
+    setSelectedPlan(newPlan);
+    setIsCreatingNew(false);
     setIsEditing(true);
     setIsPreviewing(false);
     setActiveFormTab(1);
+    showToast('Tạo giáo án ngữ cảnh thành công!', 'success');
+  };
+
+  // Xử lý tạo giáo án mới
+  const handleCreateNew = () => {
+    setIsCreatingNew(true);
+    setIsEditing(false);
+    setIsPreviewing(false);
+    setSelectedPlan(null);
+    
+    // Đặt lại các giá trị mặc định cho bộ chọn
+    setSelectedLevelId('tieu_hoc');
+    setSelectedGradeLabel('Lớp 3');
+    setSelectedTopicName('Công nghệ và đời sống');
+    setSelectedLessonTitle('Bài 1: Tự nhiên và công nghệ');
+    setIsCustomLesson(false);
+    setCustomLessonTitleInput('');
+    setCustomTopicNameInput('');
+  };
+
+  // Xử lý nhân bản giáo án (Cloning - Batch 03)
+  const handleClonePlan = (plan: LessonPlan) => {
+    setIsActionLoading(true);
+    setLoadingMessage('Đang tiến hành nhân bản giáo án...');
+    
+    setTimeout(() => {
+      try {
+        const cloned: LessonPlan = JSON.parse(JSON.stringify(plan));
+        cloned.id = `plan_${Date.now()}`;
+        cloned.title = `Bản sao - ${plan.title}`;
+        cloned.part1.lessonTitle = `Bản sao - ${plan.part1.lessonTitle}`;
+        cloned.createdAt = new Date().toISOString();
+        cloned.updatedAt = new Date().toISOString();
+        cloned.versions = []; // Bản sao mới được reset lịch sử phiên bản
+        
+        onAddPlan(cloned);
+        showToast('Nhân bản giáo án thành công!', 'success');
+      } catch (err) {
+        showToast('Lưu giáo án nhân bản thất bại. Hãy kiểm tra dung lượng trình duyệt!', 'error');
+      } finally {
+        setIsActionLoading(false);
+      }
+    }, 600);
+  };
+
+  // Lưu phiên bản mới (Version Control - Batch 03)
+  const handleSaveVersion = () => {
+    if (!formData) return;
+
+    setIsActionLoading(true);
+    setLoadingMessage('Đang ghi nhận mốc phiên bản...');
+
+    setTimeout(() => {
+      try {
+        const currentVersions = formData.versions || [];
+        const nextVersionNumber = currentVersions.length > 0 
+          ? Math.max(...currentVersions.map(v => v.v)) + 1 
+          : 1;
+        
+        const newVersion: LessonVersion = {
+          v: nextVersionNumber,
+          content: JSON.parse(JSON.stringify(formData)),
+          updatedAt: new Date().toISOString()
+        };
+        
+        const updatedPlan: LessonPlan = {
+          ...formData,
+          versions: [newVersion, ...currentVersions],
+          updatedAt: new Date().toISOString()
+        };
+        
+        setFormData(updatedPlan);
+        onUpdatePlan(updatedPlan);
+        showToast(`Lưu trữ thành công phiên bản v${nextVersionNumber}!`, 'success');
+      } catch (err) {
+        showToast('Lỗi ghi nhận phiên bản mới vào cơ sở dữ liệu!', 'error');
+      } finally {
+        setIsActionLoading(false);
+      }
+    }, 500);
+  };
+
+  // Khôi phục phiên bản cũ
+  const handleRestoreVersion = (ver: LessonVersion) => {
+    if (!window.confirm(`Xác nhận: Bạn muốn khôi phục nội dung về mốc phiên bản v${ver.v}? Toàn bộ tiến trình soạn thảo hiện tại sẽ bị thay thế.`)) {
+      return;
+    }
+
+    setIsActionLoading(true);
+    setLoadingMessage(`Đang tải dữ liệu phiên bản v${ver.v}...`);
+
+    setTimeout(() => {
+      try {
+        const currentVersions = formData?.versions || [];
+        const restored: LessonPlan = {
+          ...ver.content,
+          versions: currentVersions, // Giữ nguyên lịch sử để có thể quay lại
+          updatedAt: new Date().toISOString()
+        };
+
+        setFormData(restored);
+        onUpdatePlan(restored);
+        showToast(`Đã khôi phục thành công về phiên bản v${ver.v}!`, 'success');
+        setActiveFormTab(1); // Trở về Phần I để xem kết quả
+      } catch (err) {
+        showToast('Khôi phục phiên bản lưu trữ thất bại!', 'error');
+      } finally {
+        setIsActionLoading(false);
+      }
+    }, 500);
   };
 
   // Xử lý chọn xem/sửa giáo án
@@ -226,25 +516,328 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
   ];
 
   return (
-    <div className="space-y-6" id="teacher-workspace-container">
-      {/* Cảnh báo cứng luôn xuất hiện trên đỉnh trang học tập theo yêu cầu pháp lý */}
-      <div className="bg-amber-50 border border-amber-200/80 rounded-2xl p-4.5 text-xs flex items-start gap-3.5 shadow-xs" id="fixed-legal-advisory">
-        <div className="bg-amber-100 p-1.5 rounded-lg shrink-0">
-          <AlertTriangle className="w-5 h-5 text-amber-700" />
+    <div className="space-y-6 relative" id="teacher-workspace-container">
+      {/* Toast Alert Notification */}
+      {toast && (
+        <div className={`fixed top-5 right-5 z-50 flex items-center gap-2 px-4.5 py-3 rounded-xl shadow-lg border text-xs font-bold animate-slide-in ${
+          toast.type === 'success' 
+            ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+            : toast.type === 'error'
+            ? 'bg-rose-50 text-rose-800 border-rose-200'
+            : 'bg-blue-50 text-blue-800 border-blue-200'
+        }`}>
+          {toast.type === 'success' ? (
+            <CheckCircle className="w-4 h-4 text-emerald-600 animate-pulse" />
+          ) : (
+            <AlertCircle className="w-4 h-4 text-rose-600 animate-bounce" />
+          )}
+          <span>{toast.message}</span>
         </div>
-        <div className="space-y-0.5">
-          <span className="font-bold text-amber-950 uppercase tracking-wider block text-[10px]">
-            Thông báo Pháp lý & Nghiệm vụ Bắt buộc
-          </span>
-          <p className="text-amber-900/90 leading-relaxed font-semibold">
-            Nội dung hiển thị là dữ liệu mẫu / tham chiếu sư phạm theo chuẩn. Giáo viên bắt buộc phải tự rà soát, điều chỉnh thực tế dựa trên điều kiện giáo dục của nhà trường trước khi triển khai giảng dạy chính thức.
-          </p>
+      )}
+
+      {/* Action Loading Overlay Spinner */}
+      {isActionLoading && (
+        <div className="fixed inset-0 bg-slate-900/65 backdrop-blur-xs z-50 flex flex-col items-center justify-center gap-3">
+          <div className="w-10 h-10 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-white text-xs font-bold font-display tracking-wide">{loadingMessage || 'Đang xử lý dữ liệu...'}</span>
         </div>
-      </div>
+      )}
+
+      {/* Cảnh báo hướng dẫn sư phạm, có thể tắt đi để tiết kiệm diện tích */}
+      {!dismissedAdvisory && (
+        <div className="bg-amber-50/75 border border-amber-200/70 rounded-2xl p-4.5 text-xs flex items-start justify-between gap-3.5 shadow-3xs relative animate-fade-in" id="fixed-legal-advisory">
+          <div className="flex items-start gap-3.5">
+            <div className="bg-amber-100 p-1.5 rounded-xl shrink-0">
+              <AlertTriangle className="w-4 h-4 text-amber-700" />
+            </div>
+            <div className="space-y-0.5">
+              <span className="font-extrabold text-amber-950 uppercase tracking-wider block text-[10px]">
+                Lưu ý sư phạm quan trọng
+              </span>
+              <p className="text-amber-900/90 leading-relaxed font-semibold">
+                Các bài dạy mẫu và khung tham chiếu trên hệ thống được xây dựng làm cơ sở định hướng theo chuẩn Công văn 5512. Thầy/cô vui lòng chủ động rà soát và điều chỉnh linh hoạt nhằm bảo đảm sự phù hợp tối ưu với điều kiện dạy học thực tế tại đơn vị.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setDismissedAdvisory(true);
+              localStorage.setItem('nhip_giang_dismissed_advisory', 'true');
+            }}
+            className="p-1 text-amber-700/60 hover:text-amber-950 hover:bg-amber-100/50 rounded-lg transition-all cursor-pointer shrink-0 animate-fade-in"
+            title="Đóng thông báo này"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {!isEditing && !isPreviewing ? (
-        /* ================== GIAO DIỆN DASHBOARD GIÁO VIÊN ================== */
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" id="dashboard-view">
+        isCreatingNew ? (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-6 max-w-3xl mx-auto space-y-6 animate-fade-in" id="context-selector-card">
+            <div className="border-b border-slate-150 pb-4">
+              <h3 className="font-display font-extrabold text-slate-900 text-lg flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-50 rounded-xl">
+                  <Clock className="w-5 h-5 text-emerald-600" />
+                </div>
+                Khởi tạo thông tin & Điều kiện giảng dạy
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">Thiết lập các điều kiện lớp học thực tế và tự động chuẩn bị cấu trúc môn Công nghệ chuẩn GDPT 2018.</p>
+            </div>
+
+            {/* Section 1: Curriculum Alignment Matrix */}
+            <div className="space-y-4">
+              <h4 className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
+                <Shield className="w-4 h-4" />
+                1. Phân phối chương trình & Ma trận tương thích (Công nghệ)
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50/50 p-4.5 rounded-2xl border border-slate-200/80">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Cấp học</label>
+                  <select
+                    value={selectedLevelId}
+                    onChange={(e) => handleLevelChange(e.target.value)}
+                    className="w-full text-sm p-2.5 rounded-lg border border-slate-200 focus:outline-emerald-600 bg-white cursor-pointer"
+                  >
+                    {CURRICULUM_COMPATIBILITY_MATRIX.map(level => (
+                      <option key={level.levelId} value={level.levelId}>{level.levelLabel}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Lớp học</label>
+                  <select
+                    value={selectedGradeLabel}
+                    onChange={(e) => handleGradeChange(e.target.value)}
+                    className="w-full text-sm p-2.5 rounded-lg border border-slate-200 focus:outline-emerald-600 bg-white cursor-pointer"
+                  >
+                    {CURRICULUM_COMPATIBILITY_MATRIX.find(l => l.levelId === selectedLevelId)?.grades.map(g => (
+                      <option key={g.gradeId} value={g.gradeLabel}>{g.gradeLabel}</option>
+                    )) || <option value="">Không có dữ liệu</option>}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Môn học áp dụng</label>
+                  <input
+                    type="text"
+                    value="Công nghệ"
+                    disabled
+                    className="w-full text-sm p-2.5 rounded-lg border border-slate-200 bg-slate-100/60 text-slate-500 font-bold cursor-not-allowed"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Chủ đề / Mạch kiến thức</label>
+                  <select
+                    value={selectedTopicName}
+                    onChange={(e) => handleTopicChange(e.target.value)}
+                    className="w-full text-sm p-2.5 rounded-lg border border-slate-200 focus:outline-emerald-600 bg-white cursor-pointer"
+                  >
+                    {CURRICULUM_COMPATIBILITY_MATRIX.find(l => l.levelId === selectedLevelId)
+                      ?.grades.find(g => g.gradeLabel === selectedGradeLabel)
+                      ?.topics.map(t => (
+                        <option key={t.id} value={t.name}>{t.name}</option>
+                      )) || <option value="">Không có dữ liệu</option>}
+                    <option value="Khác">Khác (Nhập thủ công)</option>
+                  </select>
+                </div>
+
+                {selectedTopicName === 'Khác' && (
+                  <div className="col-span-1 sm:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Nhập tên Chủ đề / Mạch kiến thức thủ công</label>
+                    <input
+                      type="text"
+                      value={customTopicNameInput}
+                      onChange={(e) => setCustomTopicNameInput(e.target.value)}
+                      placeholder="Ví dụ: Công nghệ chế tạo và lắp ráp máy bay mini"
+                      className="w-full text-sm p-2.5 rounded-lg border border-slate-200 focus:outline-emerald-600 bg-white"
+                    />
+                  </div>
+                )}
+
+                <div className="col-span-1 sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Tên bài dạy học chuẩn</label>
+                  {selectedTopicName !== 'Khác' ? (
+                    <select
+                      value={selectedLessonTitle}
+                      onChange={(e) => {
+                        setSelectedLessonTitle(e.target.value);
+                        setIsCustomLesson(e.target.value === 'Khác');
+                      }}
+                      className="w-full text-sm p-2.5 rounded-lg border border-slate-200 focus:outline-emerald-600 bg-white cursor-pointer"
+                    >
+                      {CURRICULUM_COMPATIBILITY_MATRIX.find(l => l.levelId === selectedLevelId)
+                        ?.grades.find(g => g.gradeLabel === selectedGradeLabel)
+                        ?.topics.find(t => t.name === selectedTopicName)
+                        ?.lessons.map(l => (
+                          <option key={l.id} value={l.title}>{l.title}</option>
+                        )) || <option value="">Không có dữ liệu</option>}
+                      <option value="Khác">Khác (Tự nhập thủ công)</option>
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={customLessonTitleInput}
+                      onChange={(e) => setCustomLessonTitleInput(e.target.value)}
+                      placeholder="Ví dụ: Bài thực hành nâng cao tự sáng tạo"
+                      className="w-full text-sm p-2.5 rounded-lg border border-slate-200 focus:outline-emerald-600 bg-white"
+                    />
+                  )}
+                </div>
+
+                {selectedTopicName !== 'Khác' && selectedLessonTitle === 'Khác' && (
+                  <div className="col-span-1 sm:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Nhập tên bài dạy học thủ công</label>
+                    <input
+                      type="text"
+                      value={customLessonTitleInput}
+                      onChange={(e) => setCustomLessonTitleInput(e.target.value)}
+                      placeholder="Ví dụ: Bài thực hành nâng cao tự sáng tạo"
+                      className="w-full text-sm p-2.5 rounded-lg border border-slate-200 focus:outline-emerald-600 bg-white"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Matrix Validation Alert Panel */}
+              {(selectedLessonTitle === 'Khác' || selectedTopicName === 'Khác' || isCustomLesson) ? (
+                <div className="p-4 bg-amber-50 text-amber-900 border border-amber-200 rounded-2xl text-xs flex items-start gap-3">
+                  <AlertCircle className="w-4.5 h-4.5 shrink-0 text-amber-700 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <span className="font-extrabold block text-amber-950 uppercase tracking-wider text-[10px]">Bài học tự chọn (Ngoài danh mục mẫu)</span>
+                    <p className="leading-relaxed text-slate-600 font-medium">
+                      Thầy/cô đang soạn một bài giảng tự do ngoài danh mục Công nghệ chuẩn. Hệ thống sẽ chuẩn bị một biểu mẫu trống đúng cấu trúc Công văn 5512 để thầy/cô tự do nhập nội dung giảng dạy của riêng mình.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 bg-emerald-50 text-emerald-900 border border-emerald-200 rounded-2xl text-xs flex items-start gap-3">
+                  <CheckCircle className="w-4.5 h-4.5 shrink-0 text-emerald-700 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <span className="font-extrabold block text-emerald-950 uppercase tracking-wider text-[10px]">Đã khớp bài học Công nghệ chuẩn</span>
+                    <p className="leading-relaxed text-slate-600 font-medium">
+                      Đã khớp bài học mẫu trong Chương trình Giáo dục Phổ thông 2018. Hệ thống sẽ chuẩn bị sẵn khung nội dung tham khảo định hướng (Yêu cầu cần đạt, thiết bị dạy học) để hỗ trợ thầy/cô soạn bài nhanh hơn.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Section 2: Pedagogical Context Options */}
+            <div className="space-y-4 pt-2 border-t border-slate-100">
+              <h4 className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
+                <Clock className="w-4 h-4" />
+                2. Điều kiện lớp học & Thiết bị giảng dạy thực tế
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Quy mô lớp học</label>
+                  <select
+                    value={contextForm.classSize}
+                    onChange={(e) => setContextForm({ ...contextForm, classSize: e.target.value })}
+                    className="w-full text-sm p-2.5 rounded-lg border border-slate-200 focus:outline-emerald-600 bg-white cursor-pointer"
+                  >
+                    <option value="Ít">Ít (Dưới 20 học sinh)</option>
+                    <option value="Trung bình">Trung bình (20-40 học sinh)</option>
+                    <option value="Đông">Đông (Trên 40 học sinh)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Trình độ nhận thức của học sinh</label>
+                  <select
+                    value={contextForm.studentLevel}
+                    onChange={(e) => setContextForm({ ...contextForm, studentLevel: e.target.value })}
+                    className="w-full text-sm p-2.5 rounded-lg border border-slate-200 focus:outline-emerald-600 bg-white cursor-pointer"
+                  >
+                    <option value="Cần hỗ trợ">Cần hỗ trợ học tập nhiều</option>
+                    <option value="Chuẩn">Chuẩn phổ thông (Đại trà)</option>
+                    <option value="Khá">Khá giỏi (Phát triển cao)</option>
+                    <option value="Nâng cao">Nâng cao (Đội tuyển mũi nhọn)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Thiết bị, đồ dùng dạy học hiện có</label>
+                  <select
+                    value={contextForm.equipment}
+                    onChange={(e) => setContextForm({ ...contextForm, equipment: e.target.value })}
+                    className="w-full text-sm p-2.5 rounded-lg border border-slate-200 focus:outline-emerald-600 bg-white cursor-pointer"
+                  >
+                    <option value="Không thiết bị">Không có thiết bị công nghệ hỗ trợ</option>
+                    <option value="Máy chiếu">Có máy chiếu / Tivi trình chiếu lớp học</option>
+                    <option value="Điện thoại">Cho phép học sinh sử dụng Thiết bị cá nhân</option>
+                    <option value="Phòng bộ môn">Dạy học tại Phòng bộ môn / Phòng xưởng thực hành</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Không gian lớp học</label>
+                  <select
+                    value={contextForm.classroomSpace}
+                    onChange={(e) => setContextForm({ ...contextForm, classroomSpace: e.target.value })}
+                    className="w-full text-sm p-2.5 rounded-lg border border-slate-200 focus:outline-emerald-600 bg-white cursor-pointer"
+                  >
+                    <option value="Phòng cố định">Phòng học truyền thống (Bàn ghế cố định)</option>
+                    <option value="Linh hoạt">Phòng học linh hoạt (Dễ sắp xếp nhóm hoạt động)</option>
+                    <option value="Ngoài lớp">Ngoài không gian lớp học (Sân trường, xưởng ngoài)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Thời lượng tiết học định mức</label>
+                  <select
+                    value={contextForm.durationMin}
+                    onChange={(e) => setContextForm({ ...contextForm, durationMin: e.target.value })}
+                    className="w-full text-sm p-2.5 rounded-lg border border-slate-200 focus:outline-emerald-600 bg-white cursor-pointer"
+                  >
+                    <option value="35 phút">35 phút (Chuẩn tiết Tiểu học)</option>
+                    <option value="40 phút">40 phút</option>
+                    <option value="45 phút">45 phút (Chuẩn tiết Trung học)</option>
+                    <option value="90 phút">90 phút (2 tiết liên tiếp)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Mục tiêu cốt lõi của bài dạy</label>
+                  <select
+                    value={contextForm.coreObjective}
+                    onChange={(e) => setContextForm({ ...contextForm, coreObjective: e.target.value })}
+                    className="w-full text-sm p-2.5 rounded-lg border border-slate-200 focus:outline-emerald-600 bg-white cursor-pointer"
+                  >
+                    <option value="Bài mới">Chiếm lĩnh kiến thức bài mới</option>
+                    <option value="Luyện tập">Luyện tập / Thực hành kỹ xảo</option>
+                    <option value="Ôn tập">Ôn tập / Hệ thống kiến thức</option>
+                    <option value="Dự án">Thực hiện dự án STEM / Trải nghiệm sáng tạo</option>
+                    <option value="Bổ trợ">Hoạt động bồi dưỡng bổ trợ nâng cao</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Stepper Buttons Panel */}
+            <div className="border-t border-slate-150 pt-5 flex items-center justify-end gap-3.5">
+              <button
+                type="button"
+                onClick={() => setIsCreatingNew(false)}
+                className="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all text-xs font-bold cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmContext}
+                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-bold text-xs shadow-md shadow-emerald-600/15 hover:shadow-lg transition-all cursor-pointer border border-emerald-600/20"
+              >
+                Xác nhận & Bắt đầu soạn bài
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* ================== GIAO DIỆN DASHBOARD GIÁO VIÊN ================== */
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" id="dashboard-view">
           
           {/* Lịch tuần cơ bản */}
           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm lg:col-span-1 flex flex-col" id="weekly-calendar-card">
@@ -364,6 +957,13 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
                         
                         <div className="flex items-center gap-1.5">
                           <button
+                            onClick={() => handleClonePlan(plan)}
+                            className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all cursor-pointer border border-transparent hover:border-emerald-100"
+                            title="Nhân bản bài dạy"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </button>
+                          <button
                             onClick={() => handleEditExisting(plan)}
                             className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all cursor-pointer border border-transparent hover:border-emerald-100"
                             title="Sửa giáo án"
@@ -386,6 +986,7 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
             )}
           </div>
         </div>
+        )
       ) : isEditing && formData ? (
         /* ================== TRÌNH SOẠN THẢO GIÁO ÁN 8 PHẦN ================== */
         <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden" id="editor-view">
@@ -416,14 +1017,24 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
                 {isAdmin ? 'Quay lại' : 'Hủy bỏ'}
               </button>
               {!isAdmin && (
-                <button
-                  onClick={handleSave}
-                  className="inline-flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-4.5 py-2 rounded-xl shadow-md shadow-emerald-600/20 hover:shadow-lg transition-all gap-2 cursor-pointer border border-emerald-500/20"
-                  id="btn-save-plan"
-                >
-                  <Save className="w-4 h-4" />
-                  Lưu giáo án
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSaveVersion}
+                    className="inline-flex items-center justify-center bg-slate-800 hover:bg-slate-750 text-emerald-400 border border-slate-700 font-extrabold text-xs px-4 py-2 rounded-xl shadow-md transition-all gap-1.5 cursor-pointer"
+                    title="Ghi nhận mốc lịch sử phiên bản của bản thảo này"
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    Lưu phiên bản
+                  </button>
+                  <button
+                    onClick={handleSave}
+                    className="inline-flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-4.5 py-2 rounded-xl shadow-md shadow-emerald-600/20 hover:shadow-lg transition-all gap-2 cursor-pointer border border-emerald-500/20"
+                    id="btn-save-plan"
+                  >
+                    <Save className="w-4 h-4" />
+                    Lưu giáo án
+                  </button>
+                </div>
               )}
               {isAdmin && (
                 <span className="px-3.5 py-2 bg-amber-500/10 text-amber-300 border border-amber-500/25 text-xs font-bold rounded-xl">
@@ -486,6 +1097,44 @@ export default function TeacherWorkspace({ lessonPlans, onAddPlan, onUpdatePlan,
               <div className="hidden md:block mt-6 p-4 bg-white rounded-xl border border-slate-200/65 text-[11px] text-slate-500 leading-relaxed shadow-3xs">
                 <span className="font-bold text-slate-700 block mb-1 uppercase tracking-wider text-[9px]">Nguyên tắc bảo mật Owner Isolation:</span>
                 Giáo án này được lưu trữ cô lập, mã hóa cục bộ và chỉ có bạn mới có quyền xem hoặc chỉnh sửa.
+              </div>
+
+              {/* Lịch sử phiên bản (Version History Sidebar Box) */}
+              <div className="hidden md:block mt-4 p-4 bg-white rounded-xl border border-slate-200/65 shadow-3xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-slate-700 uppercase tracking-wider text-[9px] flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                    Lịch sử phiên bản
+                  </span>
+                  <span className="bg-slate-100 text-slate-600 font-mono text-[9px] px-1.5 py-0.5 rounded font-bold">
+                    {(formData.versions || []).length} mốc
+                  </span>
+                </div>
+                
+                {!(formData.versions && formData.versions.length > 0) ? (
+                  <p className="text-[10px] text-slate-400 italic">Chưa ghi nhận mốc lịch sử nào. Hãy lưu phiên bản mới ở thanh công cụ phía trên.</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+                    {formData.versions.map((ver) => (
+                      <div key={ver.v} className="flex items-center justify-between p-1.5 bg-slate-50 border border-slate-100 rounded-lg hover:border-emerald-200 transition-colors">
+                        <div className="space-y-0.5">
+                          <span className="text-[10px] font-extrabold text-slate-700">Phiên bản v{ver.v}</span>
+                          <span className="text-[8px] text-slate-400 font-mono block">
+                            {new Date(ver.updatedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} • {new Date(ver.updatedAt).toLocaleDateString('vi-VN')}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRestoreVersion(ver)}
+                          className="px-2 py-1 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 text-[9px] font-extrabold text-emerald-700 rounded-md shadow-3xs cursor-pointer transition-all inline-flex items-center gap-0.5"
+                          title="Khôi phục phiên bản này"
+                        >
+                          <RotateCcw className="w-3 h-3" /> Khôi phục
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
